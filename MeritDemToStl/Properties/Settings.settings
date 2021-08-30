@@ -1,0 +1,15 @@
+﻿<?xml version='1.0' encoding='utf-8'?>
+<SettingsFile xmlns="http://schemas.microsoft.com/VisualStudio/2004/01/settings" CurrentProfile="(Default)" GeneratedClassNamespace="MeritDemToStl.Properties" GeneratedClassName="Settings">
+  <Profiles />
+  <Settings>
+    <Setting Name="DemDirectory" Type="System.String" Scope="Application">
+      <Value Profile="(Default)">D:\MERIT DEM\Raw</Value>
+    </Setting>
+    <Setting Name="GdalDir" Type="System.String" Scope="Application">
+      <Value Profile="(Default)">C:\Users\james\source\repos\release-1928-x64-gdal-3-3-1-mapserver-7-6-4\</Value>
+    </Setting>
+    <Setting Name="WorkingDatabaseFile" Type="System.String" Scope="User">
+      <Value Profile="(Default)">D:\MERIT DEM\Working.sqlite</Value>
+    </Setting>
+  </Settings>
+</SettingsFile>
