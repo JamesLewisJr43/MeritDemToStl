@@ -41,15 +41,21 @@ namespace MeritDemToStl.Properties {
             }
         }
         
-        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Configuration.ApplicationScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
         [global::System.Configuration.DefaultSettingValueAttribute("D:\\MERIT DEM\\Working.sqlite")]
         public string WorkingDatabaseFile {
             get {
                 return ((string)(this["WorkingDatabaseFile"]));
             }
-            set {
-                this["WorkingDatabaseFile"] = value;
+        }
+        
+        [global::System.Configuration.ApplicationScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("D:\\MERIT DEM\\ne_10m_land\\ne_10m_land.kml")]
+        public string LandKml {
+            get {
+                return ((string)(this["LandKml"]));
             }
         }
     }

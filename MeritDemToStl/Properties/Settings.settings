@@ -8,8 +8,11 @@
     <Setting Name="GdalDir" Type="System.String" Scope="Application">
       <Value Profile="(Default)">C:\Users\james\source\repos\release-1928-x64-gdal-3-3-1-mapserver-7-6-4\</Value>
     </Setting>
-    <Setting Name="WorkingDatabaseFile" Type="System.String" Scope="User">
+    <Setting Name="WorkingDatabaseFile" Type="System.String" Scope="Application">
       <Value Profile="(Default)">D:\MERIT DEM\Working.sqlite</Value>
+    </Setting>
+    <Setting Name="LandKml" Type="System.String" Scope="Application">
+      <Value Profile="(Default)">D:\MERIT DEM\ne_10m_land\ne_10m_land.kml</Value>
     </Setting>
   </Settings>
 </SettingsFile>

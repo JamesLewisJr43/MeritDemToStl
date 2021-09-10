@@ -1,4 +1,5 @@
 ﻿using MapControl;
+using Microsoft.Win32;
 using OSGeo.GDAL;
 using System;
 using System.Collections.Generic;
@@ -411,6 +412,448 @@ namespace MeritDemToStl
             {
                 cell.CalculateElevationAverage();
             }
+
+            SharpKml.Engine.KmlFile file;
+            try
+            {
+                using (FileStream stream = File.Open(Properties.Settings.Default.LandKml, FileMode.Open))
+                {
+                    file = SharpKml.Engine.KmlFile.Load(stream);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.GetType() + "\n\n" + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                file = null;
+            }
+
+            List<LandPolygon> land = new List<LandPolygon>();
+            if ((file != null) && (file.Root != null) && file.Root is SharpKml.Dom.Kml kml)
+            {
+                ExtractPlacemarks(kml.Feature, land);
+            }
+
+            // Fill in unknown areas between known areas
+            FillUnknownElevation(elevationCells, cellRows, cellColumns, land);
+
+            // Calculate filled in elevations, or if base height should be used
+            for (int row = 0; row < cellRows; ++row)
+            {
+                for (int col = 0; col < cellColumns; ++col)
+                {
+                    ElevationCell cell = elevationCells[row, col];
+                    // Only need to calculate fill in elevation if we don't already know what to do
+                    if (!cell.Elevation.HasValue && !cell.UseBaseHeight)
+                    {
+                        // Need to determine fill in value
+                        if (cell.VerticalScanElevation.HasValue && cell.HorizontalScanElevation.HasValue)
+                        {
+                            // Scan found fill in elevation in both directions, use average found elevation
+                            cell.Elevation = (cell.VerticalScanElevation.Value + cell.HorizontalScanElevation.Value) / 2;
+                        }
+                        else if (cell.VerticalScanElevation.HasValue)
+                        {
+                            // Scan only found fill in elevation vertically, use found elevation
+                            cell.Elevation = cell.VerticalScanElevation;
+                        }
+                        else if (cell.HorizontalScanElevation.HasValue)
+                        {
+                            // Scan only found fill in elevation horizontally, use found elevation
+                            cell.Elevation = cell.HorizontalScanElevation;
+                        }
+                        else
+                        {
+                            // No fill in, use base height
+                            cell.UseBaseHeight = true;
+                        }
+                    }
+                }
+            }
+
+            SaveStl(elevationCells, cellRows, cellColumns, minElevation, maxElevation);
+        }
+
+        /// <summary>
+        /// Fills in the elevation data when unknown using the surounding known data
+        /// </summary>
+        /// <param name="elevationCells">Elevation mesh filled with DEM data</param>
+        /// <param name="cellRows">Number of elevation mesh rows</param>
+        /// <param name="cellColumns">Number of elevation mesh columns</param>
+        /// <param name="land">Loaded Natural Earth land polygons</param>
+        private void FillUnknownElevation(ElevationCell[,] elevationCells, int cellRows, int cellColumns, List<LandPolygon> land)
+        {
+            // Scan horizontally
+            for (int scanRow = 0; scanRow < cellRows; ++scanRow)
+            {
+                ElevationCell[] row = new ElevationCell[cellColumns];
+                for (int col = 0; col < cellColumns; ++col)
+                {
+                    row[col] = elevationCells[scanRow, col];
+                }
+                ScanUnknownElevation(false, row, land);
+            }
+            // Scan vertically
+            for (int scanCol = 0; scanCol < cellColumns; ++ scanCol)
+            {
+                ElevationCell[] col = new ElevationCell[cellRows];
+                for (int row = 0; row < cellRows; ++row)
+                {
+                    col[row] = elevationCells[row, scanCol];
+                }
+                ScanUnknownElevation(true, col, land);
+            }
+        }
+
+        /// <summary>
+        /// Fills in the elevation data when unknown using the surounding known data, for the given row or column
+        /// </summary>
+        /// <param name="vertical">If setting vertical scan value</param>
+        /// <param name="elevationCells">Elevation mesh filled with DEM data, for column or row</param>
+        /// <param name="land">Loaded Natural Earth land polygons</param>
+        private void ScanUnknownElevation(bool vertical, ElevationCell[] elevationCells, List<LandPolygon> land)
+        {
+            int startUnknown = -1;
+            for (int index = 0; index < elevationCells.Length; ++index)
+            {
+                ElevationCell cell = elevationCells[index];
+                if (cell.Elevation.HasValue)
+                {
+                    if (startUnknown >= 0)
+                    {
+                        // At end of an unknown range
+                        FillUnknownElevation(vertical, startUnknown - 1, index, elevationCells);
+                    }
+                }
+                else if (cell.UseBaseHeight)
+                {
+                    // Already determined it is not land to fill in
+                    // Unknown area has to start inside Natural Earth polygons
+                    startUnknown = -1;
+                }
+                else if (!InNaturalEarthLand(cell, land))
+                {
+                    // Not land by Natural Earth polygons, assume base height, ocean
+                    // Avoid determining this again
+                    cell.UseBaseHeight = true;
+                    // Unknown area has to start inside Natural Earth polygons
+                    startUnknown = -1;
+                }
+                else if (startUnknown < 0)
+                {
+                    startUnknown = index;
+                }
+            }
+            if (startUnknown >= 0)
+            {
+                // Have unknown area at end
+                FillUnknownElevation(vertical, startUnknown - 1, elevationCells.Length, elevationCells);
+            }
+        }
+
+        /// <summary>
+        /// Calculates a linear regression for elevation between the cells before and after an unknown area
+        /// </summary>
+        /// <param name="vertical">If setting vertical scan value</param>
+        /// <param name="start">Cell before unknown area</param>
+        /// <param name="end">Cell after unknown area</param>
+        /// <param name="elevationCells">Elevation mesh filled with DEM data, for column or row</param>
+        private void FillUnknownElevation(bool vertical, int start, int end, ElevationCell[] elevationCells)
+        {
+            float? startingElevation = (start >= 0) ? elevationCells[start].Elevation : null;
+            float? endingElevation = (end < elevationCells.Length) ? elevationCells[end].Elevation : null;
+            if (startingElevation.HasValue && endingElevation.HasValue)
+            {
+                // Have enough for a linear regression
+                float slope = (endingElevation.Value - startingElevation.Value) / (end - start);
+                for (int index = start + 1; (index < end) && (index < elevationCells.Length); ++index)
+                {
+                    float elevation = slope * (index - start) + startingElevation.Value;
+                    if (vertical)
+                    {
+                        elevationCells[index].VerticalScanElevation = elevation;
+                    }
+                    else
+                    {
+                        elevationCells[index].HorizontalScanElevation = elevation;
+                    }
+                }
+            }
+            else if (startingElevation.HasValue)
+            {
+                // Assume same as start, since no end
+                for (int index = start + 1; (index < end) && (index < elevationCells.Length); ++index)
+                {
+                    if (vertical)
+                    {
+                        elevationCells[index].VerticalScanElevation = startingElevation;
+                    }
+                    else
+                    {
+                        elevationCells[index].HorizontalScanElevation = startingElevation;
+                    }
+                }
+            }
+            else if (endingElevation.HasValue)
+            {
+                // Assume same as end, since no start
+                for (int index = start + 1; (index < end) && (index < elevationCells.Length); ++index)
+                {
+                    if (vertical)
+                    {
+                        elevationCells[index].VerticalScanElevation = endingElevation;
+                    }
+                    else
+                    {
+                        elevationCells[index].HorizontalScanElevation = endingElevation;
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Saves the given elevation cells as an equivalent STL
+        /// </summary>
+        /// <param name="elevationCells">Elevation mesh</param>
+        /// <param name="cellRows">Number of elevation mesh rows</param>
+        /// <param name="cellColumns">Number of elevation mesh columns</param>
+        /// <param name="minElevation">Minimum elevation from DEM data</param>
+        /// <param name="maxElevation">Maximum elevation from DEM data</param>
+        private void SaveStl(ElevationCell[,] elevationCells, int cellRows, int cellColumns, float? minElevation, float? maxElevation)
+        {
+            try
+            {
+                SaveFileDialog stlSaveDlg = new SaveFileDialog();
+                stlSaveDlg.Filter = "STL File (*.stl)|*.stl";
+                stlSaveDlg.DefaultExt = "stl";
+                stlSaveDlg.Title = "Save STL As";
+                if (true == stlSaveDlg.ShowDialog())
+                {
+                    if (!minElevation.HasValue || !_extractSettings.AutoScaleThickness)
+                    {
+                        minElevation = _extractSettings.MinAltitude;
+                    }
+                    if (!maxElevation.HasValue || !_extractSettings.AutoScaleThickness)
+                    {
+                        maxElevation = _extractSettings.MaxAltitude;
+                    }
+
+                    float scaleElevationSlope = (_extractSettings.Thickness - _extractSettings.BaseThickness) / (maxElevation.Value - minElevation.Value);
+                    uint triangleCount =
+                        (uint)((cellColumns - 1) * (cellRows - 1) * 2)          // Top triangles
+                        + (uint)((cellColumns - 1) * 4 + (cellRows - 1) * 4)    // Side triangles
+                        + 2;                                                    // Bottom triangles
+
+                    using (Stream stream = File.Open(stlSaveDlg.FileName, FileMode.Create))
+                    {
+                        // Header for a binary STL is 80 bytes
+                        byte[] header = new byte[80];
+                        Encoding.ASCII.GetBytes("Generated by MERIT DEM to STL").CopyTo(header, 0);
+                        stream.Write(header, 0, header.Length);
+                        StlTriangle.WriteTriangleCount(triangleCount, stream);
+
+                        for (int row = 1; row < cellRows; ++row)
+                        {
+                            // Left edge triangles
+                            ElevationCell topLeftMost = elevationCells[row, 0];
+                            ElevationCell bottomLeftMost = elevationCells[row - 1, 0];
+
+                            StlVertex baseTop = new StlVertex(topLeftMost.XCoord, topLeftMost.YCoord, 0);
+                            StlVertex baseBottom = new StlVertex(bottomLeftMost.XCoord, bottomLeftMost.YCoord, 0);
+                            StlVertex topLeftMostVertex = new StlVertex(
+                                topLeftMost.XCoord, topLeftMost.YCoord,
+                                CalculateScaledHeight(scaleElevationSlope, topLeftMost.Elevation, minElevation.Value));
+                            StlVertex bottomLeftMostVertex = new StlVertex(
+                                bottomLeftMost.XCoord, bottomLeftMost.YCoord,
+                                CalculateScaledHeight(scaleElevationSlope, bottomLeftMost.Elevation, minElevation.Value));
+
+                            StlTriangle triangle = new StlTriangle(topLeftMostVertex, baseTop, baseBottom);
+                            triangle.WriteToStream(stream);
+                            triangle = new StlTriangle(topLeftMostVertex, baseBottom, bottomLeftMostVertex);
+                            triangle.WriteToStream(stream);
+
+                            // Top mesh triangles
+                            for (int col = 1; col < cellColumns; ++ col)
+                            {
+                                ElevationCell topLeft = elevationCells[row, col - 1];
+                                ElevationCell bottomLeft = elevationCells[row - 1, col - 1];
+                                ElevationCell topRight = elevationCells[row, col];
+                                ElevationCell bottomRight = elevationCells[row - 1, col];
+
+                                StlVertex topLeftVertex = new StlVertex(
+                                    topLeft.XCoord, topLeft.YCoord, 
+                                    CalculateScaledHeight(scaleElevationSlope, topLeft.Elevation, minElevation.Value));
+                                StlVertex bottomLeftVertex = new StlVertex(
+                                    bottomLeft.XCoord, bottomLeft.YCoord,
+                                    CalculateScaledHeight(scaleElevationSlope, bottomLeft.Elevation, minElevation.Value));
+                                StlVertex topRightVertex = new StlVertex(
+                                    topRight.XCoord, topRight.YCoord,
+                                    CalculateScaledHeight(scaleElevationSlope, topRight.Elevation, minElevation.Value));
+                                StlVertex bottomRightVertex = new StlVertex(
+                                    bottomRight.XCoord, bottomRight.YCoord,
+                                    CalculateScaledHeight(scaleElevationSlope, bottomRight.Elevation, minElevation.Value));
+
+                                triangle = new StlTriangle(topLeftVertex, bottomRightVertex, topRightVertex);
+                                triangle.WriteToStream(stream);
+                                triangle = new StlTriangle(topLeftVertex, bottomLeftVertex, bottomRightVertex);
+                                triangle.WriteToStream(stream);
+                            }
+
+                            // Right edge triangles
+                            ElevationCell topRightMost = elevationCells[row, cellColumns - 1];
+                            ElevationCell bottomRightMost = elevationCells[row - 1, cellColumns - 1];
+
+                            baseTop = new StlVertex(topRightMost.XCoord, topRightMost.YCoord, 0);
+                            baseBottom = new StlVertex(bottomRightMost.XCoord, bottomRightMost.YCoord, 0);
+                            StlVertex topRightMostVertex = new StlVertex(
+                                topRightMost.XCoord, topRightMost.YCoord,
+                                CalculateScaledHeight(scaleElevationSlope, topRightMost.Elevation, minElevation.Value));
+                            StlVertex bottomRightMostVertex = new StlVertex(
+                                bottomRightMost.XCoord, bottomRightMost.YCoord,
+                                CalculateScaledHeight(scaleElevationSlope, bottomRightMost.Elevation, minElevation.Value));
+
+                            triangle = new StlTriangle(topRightMostVertex, baseBottom, baseTop);
+                            triangle.WriteToStream(stream);
+                            triangle = new StlTriangle(topRightMostVertex, bottomRightMostVertex, baseBottom);
+                            triangle.WriteToStream(stream);
+                        }
+
+                        // Top/Bottom edge triangles
+                        for (int col = 1; col < cellColumns; ++col)
+                        {
+                            // Top edge triangles
+                            ElevationCell topLeft = elevationCells[cellRows - 1, col - 1];
+                            ElevationCell topRight = elevationCells[cellRows - 1, col];
+
+                            StlVertex baseLeft = new StlVertex(topLeft.XCoord, topLeft.YCoord, 0);
+                            StlVertex baseRight = new StlVertex(topRight.XCoord, topRight.YCoord, 0);
+                            StlVertex topLeftVertex = new StlVertex(
+                                    topLeft.XCoord, topLeft.YCoord,
+                                    CalculateScaledHeight(scaleElevationSlope, topLeft.Elevation, minElevation.Value));
+                            StlVertex topRightVertex = new StlVertex(
+                                    topRight.XCoord, topRight.YCoord,
+                                    CalculateScaledHeight(scaleElevationSlope, topRight.Elevation, minElevation.Value));
+
+                            StlTriangle triangle = new StlTriangle(topLeftVertex, baseRight, baseLeft);
+                            triangle.WriteToStream(stream);
+                            triangle = new StlTriangle(topLeftVertex, topRightVertex, baseRight);
+                            triangle.WriteToStream(stream);
+
+                            // Bottom edge triangles
+                            topLeft = elevationCells[0, col - 1];
+                            topRight = elevationCells[0, col];
+
+                            baseLeft = new StlVertex(topLeft.XCoord, topLeft.YCoord, 0);
+                            baseRight = new StlVertex(topRight.XCoord, topRight.YCoord, 0);
+                            topLeftVertex = new StlVertex(
+                                    topLeft.XCoord, topLeft.YCoord,
+                                    CalculateScaledHeight(scaleElevationSlope, topLeft.Elevation, minElevation.Value));
+                            topRightVertex = new StlVertex(
+                                    topRight.XCoord, topRight.YCoord,
+                                    CalculateScaledHeight(scaleElevationSlope, topRight.Elevation, minElevation.Value));
+
+                            triangle = new StlTriangle(topLeftVertex, baseLeft, baseRight);
+                            triangle.WriteToStream(stream);
+                            triangle = new StlTriangle(topLeftVertex, baseRight, topRightVertex);
+                            triangle.WriteToStream(stream);
+                        }
+
+                        // Base triangles
+                        ElevationCell baseTopLeft = elevationCells[cellRows - 1, 0];
+                        ElevationCell baseTopRight = elevationCells[cellRows - 1, cellColumns - 1];
+                        ElevationCell baseBottomLeft = elevationCells[0, 0];
+                        ElevationCell baseBottomRight = elevationCells[0, cellColumns - 1];
+
+                        StlVertex baseTopLeftVertex = new StlVertex(baseTopLeft.XCoord, baseTopLeft.YCoord, 0);
+                        StlVertex baseTopRightVertex = new StlVertex(baseTopRight.XCoord, baseTopRight.YCoord, 0);
+                        StlVertex baseBottomLeftVertex = new StlVertex(baseBottomLeft.XCoord, baseBottomLeft.YCoord, 0);
+                        StlVertex baseBottomRightVertex = new StlVertex(baseBottomRight.XCoord, baseBottomRight.YCoord, 0);
+
+                        StlTriangle baseTriangle = new StlTriangle(baseTopLeftVertex, baseBottomRightVertex, baseBottomLeftVertex);
+                        baseTriangle.WriteToStream(stream);
+                        baseTriangle = new StlTriangle(baseTopLeftVertex, baseTopRightVertex, baseBottomRightVertex);
+                        baseTriangle.WriteToStream(stream);
+                    }
+                }
+
+                MessageBox.Show("Finished", "Generate STL", MessageBoxButton.OK, MessageBoxImage.None);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Problem saving STL file:\n\n" + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        /// <summary>
+        /// Calculates the scale height from the elevation
+        /// </summary>
+        /// <param name="scaleElevationSlope">Pre-calculated elevation scaling slope</param>
+        /// <param name="elevation">Elevation for the mesh cell</param>
+        /// <param name="minElevation">Minimum elevation that is at base thickness</param>
+        /// <returns>Calculated STL height</returns>
+        private float CalculateScaledHeight(float scaleElevationSlope, float? elevation, float minElevation)
+        {
+            float height = _extractSettings.BaseThickness;
+            if (elevation.HasValue)
+            {
+                height = scaleElevationSlope * (elevation.Value - minElevation) + _extractSettings.BaseThickness;
+            }
+            return height;
+        }
+
+        /// <summary>
+        /// Extracts the polygons for testing points
+        /// </summary>
+        /// <param name="feature">KML feature to extract polygons from</param>
+        /// <param name="land">Extracted polygons</param>
+        private static void ExtractPlacemarks(SharpKml.Dom.Feature feature, List<LandPolygon> land)
+        {
+            // Is the passed in value a Placemark?
+            if (feature is SharpKml.Dom.Placemark placemark)
+            {
+                // Assume certain characteristics of the converted Natural Earth land file
+                if (placemark.Geometry is SharpKml.Dom.MultipleGeometry multiGeometry)
+                {
+                    foreach (var geometry in multiGeometry.Geometry)
+                    {
+                        if (geometry is SharpKml.Dom.Polygon polygon)
+                        {
+                            land.Add(new LandPolygon(polygon));
+                        }
+                    }
+                }
+            }
+            else
+            {
+                // Is it a Container, as the Container might have a child Placemark?
+                if (feature is SharpKml.Dom.Container container)
+                {
+                    // Check each Feature to see if it's a Placemark or another Container
+                    foreach (SharpKml.Dom.Feature f in container.Features)
+                    {
+                        ExtractPlacemarks(f, land);
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Test if the given cell is inside any land polygons
+        /// </summary>
+        /// <param name="cell">Cell to test</param>
+        /// <param name="land">Loaded land polygons</param>
+        /// <returns>If the given cell is inside any land polygons</returns>
+        public bool InNaturalEarthLand(ElevationCell cell, List<LandPolygon> land)
+        {
+            bool inLand = false;
+            foreach (var polygon in land)
+            {
+                if (polygon.IsPointInPolygon(cell.Longitude, cell.Latitude))
+                {
+                    inLand = true;
+                    break;
+                }
+            }
+            return inLand;
         }
 
         private void Goto_Click(object sender, RoutedEventArgs e)

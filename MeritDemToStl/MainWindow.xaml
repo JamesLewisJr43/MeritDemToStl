@@ -53,6 +53,7 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
@@ -70,18 +71,21 @@
             <TextBlock Grid.Row="2" Grid.Column="0" Margin="3" VerticalAlignment="Center" Text="Height" />
             <TextBox Grid.Row="2" Grid.Column="1" Margin="3" Name="HeightTextBox" Text="{Binding Path=Height}" />
 
-            <TextBlock Grid.Row="3" Grid.Column="0" Margin="3" VerticalAlignment="Center" Text="Thickness" />
-            <TextBox Grid.Row="3" Grid.Column="1" Margin="3" Name="ThicknessTextBox" Text="{Binding Path=Thickness}" />
+            <TextBlock Grid.Row="3" Grid.Column="0" Margin="3" VerticalAlignment="Center" Text=" Base Thickness" />
+            <TextBox Grid.Row="3" Grid.Column="1" Margin="3" Name="BaseThicknessTextBox" Text="{Binding Path=BaseThickness}" />
 
-            <CheckBox Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2" Margin="3" Name="AutoScaleCheck" Content="Auto Scale Thickness" IsChecked="{Binding Path=AutoScaleThickness}" />
+            <TextBlock Grid.Row="4" Grid.Column="0" Margin="3" VerticalAlignment="Center" Text="Thickness" />
+            <TextBox Grid.Row="4" Grid.Column="1" Margin="3" Name="ThicknessTextBox" Text="{Binding Path=Thickness}" />
 
-            <TextBlock Grid.Row="5" Grid.Column="0" Margin="3" VerticalAlignment="Center" Text="Min Altitude" />
-            <TextBox Grid.Row="5" Grid.Column="1" Margin="3" Name="MinAltitudeTextBox" Text="{Binding Path=MinAltitude}" IsReadOnly="{Binding Path=AutoScaleThickness}" />
+            <CheckBox Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="2" Margin="3" Name="AutoScaleCheck" Content="Auto Scale Thickness" IsChecked="{Binding Path=AutoScaleThickness}" />
 
-            <TextBlock Grid.Row="6" Grid.Column="0" Margin="3" VerticalAlignment="Center" Text="Max Altitude" />
-            <TextBox Grid.Row="6" Grid.Column="1" Margin="3" Name="MaxAltitudeTextBox" Text="{Binding Path=MaxAltitude}" IsReadOnly="{Binding Path=AutoScaleThickness}" />
+            <TextBlock Grid.Row="6" Grid.Column="0" Margin="3" VerticalAlignment="Center" Text="Min Altitude" />
+            <TextBox Grid.Row="6" Grid.Column="1" Margin="3" Name="MinAltitudeTextBox" Text="{Binding Path=MinAltitude}" IsReadOnly="{Binding Path=AutoScaleThickness}" />
 
-            <Button Grid.Row="8" Grid.Column="0" Grid.ColumnSpan="2" Margin="3" Name="Generate" Content="Generate" Click="Generate_Click" />
+            <TextBlock Grid.Row="7" Grid.Column="0" Margin="3" VerticalAlignment="Center" Text="Max Altitude" />
+            <TextBox Grid.Row="7" Grid.Column="1" Margin="3" Name="MaxAltitudeTextBox" Text="{Binding Path=MaxAltitude}" IsReadOnly="{Binding Path=AutoScaleThickness}" />
+
+            <Button Grid.Row="9" Grid.Column="0" Grid.ColumnSpan="2" Margin="3" Name="Generate" Content="Generate" Click="Generate_Click" />
         </Grid>
 
         <map:Map Grid.Row="1" Grid.Column="1" x:Name="map" ZoomLevel="11" MaxZoomLevel="21" MouseWheelZoomDelta="0.25">

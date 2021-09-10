@@ -43,6 +43,16 @@ namespace MeritDemToStl
         public double West { get; private set; }
 
         /// <summary>
+        /// Longitude of the center of the cell
+        /// </summary>
+        public double Longitude { get; private set; }
+
+        /// <summary>
+        /// Latitude of the center of the cell
+        /// </summary>
+        public double Latitude { get; private set; }
+
+        /// <summary>
         /// Sum of elevation values
         /// </summary>
         public double ElevationSum { get; set; }
@@ -56,6 +66,21 @@ namespace MeritDemToStl
         /// Calculate average elevation or filled in elevation
         /// </summary>
         public float? Elevation { get; set; }
+
+        /// <summary>
+        /// If the cell is in open ocean, and should use base height
+        /// </summary>
+        public bool UseBaseHeight { get; set; }
+
+        /// <summary>
+        /// Linear regression elevation between known cells when scanning horizontally
+        /// </summary>
+        public float? HorizontalScanElevation { get; set; }
+
+        /// <summary>
+        /// Linear regression elevation between known cells when scanning vertically
+        /// </summary>
+        public float? VerticalScanElevation { get; set; }
 
         /// <summary>
         /// Create cell data
@@ -74,9 +99,14 @@ namespace MeritDemToStl
             South = south;
             East = east;
             West = west;
+            Longitude = (East + West) / 2;
+            Latitude = (North + South) / 2;
             ElevationSum = 0.0;
             ElevationCount = 0;
             Elevation = null;
+            UseBaseHeight = false;
+            HorizontalScanElevation = null;
+            VerticalScanElevation = null;
         }
 
         /// <summary>
