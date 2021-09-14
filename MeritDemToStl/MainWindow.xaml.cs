@@ -253,9 +253,7 @@ namespace MeritDemToStl
         /// <param name="cellColumns">Columns in the elevation cell matrix</param>
         /// <param name="cellHeight">Size of the STL mesh cell vertically</param>
         /// <param name="cellWidth">Size of the STL mesh cell horizontally</param>
-        /// <param name="minElevation">Minimum elevation that has been extracted</param>
-        /// <param name="maxElevation">Maximum elevation that has been extracted</param>
-        private void ExtractElevationFromGeoTiff(DemTile tile, BoundingBox readBounds, ElevationCell[,] elevationCells, int cellRows, int cellColumns, double cellHeight, double cellWidth, ref float? minElevation, ref float? maxElevation)
+        private void ExtractElevationFromGeoTiff(DemTile tile, BoundingBox readBounds, ElevationCell[,] elevationCells, int cellRows, int cellColumns, double cellHeight, double cellWidth)
         {
             using (Dataset ds = Gdal.Open(tile.FilePath, Access.GA_ReadOnly))
             {
@@ -318,16 +316,6 @@ namespace MeritDemToStl
 
                             if (elevation.HasValue)
                             {
-                                // Update elevation range
-                                if (!minElevation.HasValue || (elevation.Value < minElevation.Value))
-                                {
-                                    minElevation = elevation;
-                                }
-                                if (!maxElevation.HasValue || (elevation.Value > maxElevation.Value))
-                                {
-                                    maxElevation = elevation;
-                                }
-
                                 // Update overlapping cells
                                 int startRow = (int)Math.Floor((south - _extractSettings.Bounds.South) / cellHeight);
                                 if (startRow < 0) startRow = 0;
@@ -382,8 +370,6 @@ namespace MeritDemToStl
                 }
             }
 
-            float? minElevation = null;
-            float? maxElevation = null;
             for (int y = 0; y < DemTile.Y_TILES; y++)
             {
                 for (int x = 0; x < DemTile.X_TILES; x++)
@@ -397,7 +383,7 @@ namespace MeritDemToStl
 
                     try
                     {
-                        ExtractElevationFromGeoTiff(tile, readBounds, elevationCells, cellRows, cellColumns, cellHeight, cellWidth, ref minElevation, ref maxElevation);
+                        ExtractElevationFromGeoTiff(tile, readBounds, elevationCells, cellRows, cellColumns, cellHeight, cellWidth);
                     }
                     catch (Exception ex)
                     {
@@ -407,10 +393,25 @@ namespace MeritDemToStl
                 }
             }
 
+            // Use cell averages for elevation range
+            float? minElevation = null;
+            float? maxElevation = null;
             // Calculate the average elevations, only once
             foreach (var cell in elevationCells)
             {
                 cell.CalculateElevationAverage();
+
+                if (cell.Elevation.HasValue)
+                {
+                    if (!minElevation.HasValue || (cell.Elevation.Value < minElevation.Value))
+                    {
+                        minElevation = cell.Elevation;
+                    }
+                    if (!maxElevation.HasValue || (cell.Elevation.Value > maxElevation.Value))
+                    {
+                        maxElevation = cell.Elevation;
+                    }
+                }
             }
 
             SharpKml.Engine.KmlFile file;
